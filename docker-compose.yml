@@ -1,0 +1,118 @@
+version: "3.9"
+
+services:
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    volumes:
+      - /home/Projetos/monolitico:/var/www/monolitico
+      - /home/Projetos/monolitico/coverage:/var/www/monolitico/coverage
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - app_network
+
+  nginx_laravel:
+    image: nginx:latest
+    ports:
+      - "9000:80"
+    volumes:
+      - /home/Projetos/laravel/laravel-api:/var/www/laravel
+      - /home/Projetos/laravel/laravel-security:/var/www/security
+      - ./nginx/laravel.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - app_network
+
+  nginx_python:
+    image: nginx:latest
+    ports:
+      - "5000:80"
+    volumes:
+      - ./nginx/python.conf:/etc/nginx/conf.d/default.conf
+    networks:
+      - app_network
+
+  php56:
+    image: composer:1.10
+    command: tail -f /dev/null
+    volumes:
+      - /home/Projetos/monolitico:/var/www/monolitico
+    working_dir: /var/www/monolitico
+    networks:
+      - app_network
+
+  php56-fpm:
+    image: php:5.6-fpm
+    volumes:
+      - /home/Projetos/monolitico:/var/www/monolitico
+      - ./php/opcache.ini:/usr/local/etc/php/conf.d/opcache.ini
+      - ./logs/php56:/var/log/php
+    networks:
+      - app_network
+
+  php84:
+    image: php:8.4-fpm
+    volumes:
+      - /home/Projetos/laravel/laravel-api:/var/www/laravel
+      - /home/Projetos/laravel/laravel-security:/var/www/security
+      - ./php/php.ini:/usr/local/etc/php/conf.d/custom.ini
+    environment:
+      - TMPDIR=/var/www/laravel/storage/tmp
+    networks:
+      - app_network
+
+  python:
+    image: python:latest
+    working_dir: /app
+    volumes:
+      - /home/Projetos/python:/app
+    command: python app.py
+    networks:
+      - app_network
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    networks:
+      - app_network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    networks:
+      - app_network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.0.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+    ports:
+      - "9200:9200"
+    networks:
+      - app_network
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.0.0
+    ports:
+      - "5601:5601"
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    networks:
+      - app_network
+
+networks:
+  app_network:
