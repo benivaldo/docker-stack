@@ -114,5 +114,16 @@ services:
     networks:
       - app_network
 
+  node_api:
+    build:
+      context: /home/Projetos/node-api
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - /home/Projetos/node-api:/usr/src/app
+    networks:
+      - app_network
+
 networks:
   app_network:
