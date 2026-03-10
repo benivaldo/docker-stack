@@ -100,6 +100,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
       - "9200:9200"
     networks:
@@ -113,6 +114,17 @@ services:
       - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
     networks:
       - app_network
+
+  filebeat:
+    image: docker.elastic.co/beats/filebeat:8.12.0
+    user: root
+    volumes:
+      - /home/Projetos/filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml
+      - /home/Projetos/laravel/laravel-api/storage/logs:/logs
+    depends_on:
+      - elasticsearch
+    networks:
+    - app_network     
 
   node_api:
     build:

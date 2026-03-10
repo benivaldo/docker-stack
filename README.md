@@ -26,6 +26,7 @@ docker-compose down
 | RabbitMQ | 5672, 15672 | Message Broker |
 | Elasticsearch | 9200 | Search Engine |
 | Kibana | 5601 | Data Visualization |
+| Nginx (Node) | 5000 | Node Application |
 
 ## 📚 Documentação
 
@@ -60,6 +61,7 @@ docker-stack/
 - **RabbitMQ Management**: http://localhost:15672 (admin/admin)
 - **Kibana**: http://localhost:5601
 - **Elasticsearch**: http://localhost:9200
+- **Node API**: http://localhost:3000
 
 ## 📝 Comandos Úteis
 
