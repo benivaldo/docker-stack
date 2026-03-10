@@ -19,6 +19,8 @@ Este stack Docker fornece um ambiente completo para desenvolvimento com múltipl
 - **RabbitMQ** (portas 5672, 15672)
 - **Elasticsearch** (porta 9200)
 - **Kibana** (porta 5601)
+- **Jenkins** (porta 8080 - CI/CD)
+- **Node.js API** (porta 3000)
 
 ---
 
@@ -175,10 +177,14 @@ PHP-FPM 8.4 para processar requisições PHP do Laravel.
 
 ```yaml
 php84:
-  image: php:8.4-fpm
+  build:
+    context: .
+    dockerfile: php84.Dockerfile
   volumes:
     - /home/Projetos/laravel/laravel-api:/var/www/laravel
     - ./php/php.ini:/usr/local/etc/php/conf.d/custom.ini
+  environment:
+    - TMPDIR=/tmp
   networks:
     - app_network
 ```
@@ -188,9 +194,13 @@ php84:
 - `volumes`:
   - Monta diretório do projeto Laravel
   - Monta configuração customizada do PHP
+- `environment`:
+  - `TMPDIR=/tmp`: Define diretório temporário do sistema (resolve erro de `tempnam()`)
 - `networks`: Conecta à rede compartilhada
 
 **Uso:** Processa arquivos PHP via FastCGI (porta 9000 interna)
+
+**❌ Problema Resolvido:** O erro `tempnam(): file created in the system's temporary directory` foi corrigido definindo `TMPDIR=/tmp` em vez de um diretório que pode não existir.
 
 ---
 
@@ -335,6 +345,43 @@ kibana:
 
 ---
 
+#### **jenkins**
+Servidor de automação e CI/CD (Integração Contínua/Deploy Contínuo).
+
+```yaml
+jenkins:
+  image: jenkins/jenkins:latest
+  ports:
+    - "8080:8080"
+    - "50000:50000"
+  volumes:
+    - jenkins_home:/var/jenkins_home
+    - /var/run/docker.sock:/var/run/docker.sock
+  environment:
+    - JENKINS_OPTS=--prefix=/jenkins
+  networks:
+    - app_network
+```
+
+**Campos:**
+- `image`: Jenkins última versão oficial
+- `ports`:
+  - `8080`: Interface web do Jenkins
+  - `50000`: Porta para agentes Jenkins (JNLP)
+- `volumes`:
+  - `jenkins_home`: Volume nomeado para persistência de dados
+  - `/var/run/docker.sock`: Socket Docker para permitir que Jenkins execute containers
+- `environment`:
+  - `JENKINS_OPTS`: Opções do Jenkins (prefixo de URL)
+- `networks`: Conecta à rede compartilhada
+
+**Uso:**
+- Interface Web: http://localhost:8080
+- Senha inicial: `docker logs jenkins`
+- Executar pipelines, builds e testes automatizados
+
+---
+
 ### Networks
 
 ```yaml
@@ -346,6 +393,22 @@ networks:
 - `app_network`: Rede bridge customizada que permite comunicação entre todos os containers usando nomes de serviço como hostname.
 
 **Uso:** Containers podem se comunicar usando nomes de serviço (ex: `http://redis:6379`, `http://elasticsearch:9200`)
+
+---
+
+### Volumes
+
+```yaml
+volumes:
+  jenkins_home:
+```
+
+**Campo:**
+- `jenkins_home`: Volume nomeado que persiste dados do Jenkins (configurações, jobs, histórico de builds).
+
+**Uso:** Garante que dados do Jenkins não sejam perdidos ao reiniciar containers.
+
+**Localização no Host:** `/var/lib/docker/volumes/docker-stack_jenkins_home/_data/`
 
 ---
 
@@ -394,26 +457,59 @@ server {
 server {
     listen 80;
     server_name _;
+
     root /var/www/laravel/public;
     index index.php;
 
-    location ~ \.php$ {
-        fastcgi_pass php84:9000;
-        fastcgi_index index.php;
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
+    # Reescrever requisições de API
+    location /api {
+        try_files $uri $uri/ /index.php?$query_string;
+        
+        location ~ \.php$ {
+            fastcgi_pass php84:9000;
+            fastcgi_index index.php;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            include fastcgi_params;
+        }
     }
 
+    # Outras requisições
     location / {
         try_files $uri $uri/ /index.php?$query_string;
+        
+        location ~ \.php$ {
+            fastcgi_pass php84:9000;
+            fastcgi_index index.php;
+            fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+            include fastcgi_params;
+        }
+    }
+
+    # Negar acesso direto a arquivos sensíveis
+    location ~ /\.env {
+        deny all;
     }
 }
 ```
 
 **Diretivas:**
-- Mesma estrutura do default.conf
-- `fastcgi_pass php84:9000`: Encaminha para PHP-FPM 8.4
+- `listen 80`: Escuta na porta 80
+- `server_name _`: Aceita qualquer hostname
 - `root /var/www/laravel/public`: Diretório público do Laravel
+- `index index.php`: Arquivo index padrão
+- `location /api`: Roteamento específico para API
+  - `try_files`: Tenta arquivo, depois diretório, depois redireciona para index.php
+- `location ~ \.php$`: Processa arquivos PHP
+  - `fastcgi_pass php84:9000`: Encaminha para PHP-FPM 8.4
+  - `fastcgi_param SCRIPT_FILENAME`: Define caminho do script
+  - `include fastcgi_params`: Inclui parâmetros FastCGI padrão
+- `location ~ /\.env`: Nega acesso ao arquivo .env (segurança)
+
+**✅ Melhorias:** 
+- Removido `alias` que causava conflitos
+- Simplificadas as rotas de reescrita
+- Adicionada proteção para arquivo `.env`
+- Agora `/api/ping` é processado corretamente pelo Laravel
 
 ---
 
@@ -502,6 +598,124 @@ display_errors = Off
 **Uso:** Otimiza performance do PHP 5.6 e registra erros em arquivo específico
 
 ---
+
+## Solução de Problemas
+
+### ❌ Erro: `tempnam(): file created in the system's temporary directory`
+
+**Causa:** O diretório temporário configurado não existe ou não é acessível.
+
+**Solução:**
+```yaml
+php84:
+  environment:
+    - TMPDIR=/tmp  # Usar /tmp em vez de diretórios customizados
+```
+
+**Verificação:**
+```bash
+docker-compose exec php84 php -r "echo sys_get_temp_dir();"
+# Deve exibir: /tmp
+```
+
+---
+
+### ❌ Erro: `502 Bad Gateway` ao acessar Laravel em http://127.0.0.1:9000
+
+**Causa:** 
+- Nginx não consegue conectar ao container PHP
+- Configuração de FastCGI incorreta
+- Container PHP não está rodando
+
+**Solução 1 - Verificar conexão:**
+```bash
+docker-compose exec nginx_laravel ping php84
+# Se falhar, os containers não estão na mesma rede
+```
+
+**Solução 2 - Reiniciar containers:**
+```bash
+docker-compose restart nginx_laravel php84
+```
+
+**Solução 3 - Verificar logs:**
+```bash
+docker-compose logs nginx_laravel
+docker-compose logs php84
+```
+
+---
+
+### ❌ Erro: Laravel funcionando com `artisan serve` mas não via Docker
+
+**Causas Comuns:**
+1. Diretório raiz do Nginx incorreto
+2. Arquivo `.env` não configurado no container
+3. Permissões de diretório (storage/logs)
+
+**Solução:**
+```bash
+# 1. Copiar .env se não existir
+docker-compose exec php84 cp .env.example .env
+
+# 2. Gerar chave de aplicação
+docker-compose exec php84 php artisan key:generate
+
+# 3. Verificar permissões do storage
+docker-compose exec php84 chmod -R 775 storage bootstrap/cache
+```
+
+---
+
+### ✅ Iniciar todo o stack
+
+```bash
+# Parar todos os containers
+docker-compose down
+
+# Limpar volumes (dados serão perdidos)
+docker-compose down -v
+
+# Iniciar com rebuild (recomendado após atualizações)
+docker-compose up -d --build
+
+# Visualizar logs em tempo real
+docker-compose logs -f
+
+# Visualizar logs de um serviço específico
+docker-compose logs -f php84
+```
+
+---
+
+### ✅ Comandos Úteis
+
+**Acessar terminal do container:**
+```bash
+docker-compose exec php84 bash
+docker-compose exec nginx_laravel bash
+```
+
+**Executar comando dentro do container:**
+```bash
+# Artisan no Laravel
+docker-compose exec php84 php artisan migrate
+docker-compose exec php84 php artisan tinker
+
+# Composer
+docker-compose exec php56 composer install
+```
+
+**Visualizar portas e conexões:**
+```bash
+docker-compose ps
+docker network inspect docker-stack_app_network
+```
+
+**Limpar dados do Jenkins:**
+```bash
+docker volume rm docker-stack_jenkins_home
+```
 
 ## Dockerfile PHP 5.6
 
